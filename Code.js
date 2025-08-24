@@ -1421,99 +1421,44 @@ function createABVSheet() {
       abvSheet = spreadsheet.insertSheet('ABV');
     }
     
-    // Get taxonomy data
-    var taxonomySheet = spreadsheet.getSheetByName('Taxonomy');
-    if (!taxonomySheet) {
-      SpreadsheetApp.getUi().alert('Error', 'Taxonomy sheet not found.', SpreadsheetApp.getUi().ButtonSet.OK);
+    // Get data from Monthly Expanded sheet
+    var monthlyExpandedSheet = spreadsheet.getSheetByName('Monthly Expanded');
+    if (!monthlyExpandedSheet) {
+      SpreadsheetApp.getUi().alert('Error', 'Monthly Expanded sheet not found. Please ensure the Monthly Expanded sheet exists with the required data.', SpreadsheetApp.getUi().ButtonSet.OK);
       return;
     }
     
-    var taxonomyValues = taxonomySheet.getDataRange().getValues();
+    var expandedValues = monthlyExpandedSheet.getDataRange().getValues();
+    if (expandedValues.length <= 1) {
+      SpreadsheetApp.getUi().alert('Error', 'Monthly Expanded sheet is empty. Please ensure it contains data.', SpreadsheetApp.getUi().ButtonSet.OK);
+      return;
+    }
     var uniquePairs = new Set();
     var categoryPairs = [];
     
-    // Parse header row to find month columns
-    var monthColumns = {};
-    var headerRow = taxonomyValues[0];
-    var monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
-                     'July', 'August', 'September', 'October', 'November', 'December'];
-    
-    for (var col = 2; col < headerRow.length; col++) {
-      if (headerRow[col] !== null && headerRow[col] !== undefined && headerRow[col] !== '') {
-        var headerValue = headerRow[col];
-        var monthName = null;
-        
-        // Check if it's a month integer (1-12)
-        if (typeof headerValue === 'number' && headerValue >= 1 && headerValue <= 12) {
-          monthName = monthNames[headerValue - 1]; // Convert 1-based to 0-based index
-        } 
-        // Check if it's a string representation of month integer
-        else if (typeof headerValue === 'string') {
-          var monthInt = parseInt(headerValue.trim());
-          if (!isNaN(monthInt) && monthInt >= 1 && monthInt <= 12) {
-            monthName = monthNames[monthInt - 1];
-          } else {
-            // Map various month text formats to standard month names
-            var headerLower = headerValue.toString().trim().toLowerCase();
-            var monthMapping = {
-              'jan': 'January', 'january': 'January',
-              'feb': 'February', 'february': 'February',
-              'mar': 'March', 'march': 'March',
-              'apr': 'April', 'april': 'April',
-              'may': 'May',
-              'jun': 'June', 'june': 'June',
-              'jul': 'July', 'july': 'July',
-              'aug': 'August', 'august': 'August',
-              'sep': 'September', 'september': 'September',
-              'oct': 'October', 'october': 'October',
-              'nov': 'November', 'november': 'November',
-              'dec': 'December', 'december': 'December'
-            };
-            
-            if (monthMapping[headerLower]) {
-              monthName = monthMapping[headerLower];
-            }
-          }
-        }
-        
-        if (monthName) {
-          monthColumns[monthName] = col;
-        }
-      }
-    }
-    
-    // Extract unique Level 1 and Level 2 pairs with their planned amounts (skip header row)
-    for (var i = 1; i < taxonomyValues.length; i++) {
-      var level2 = taxonomyValues[i][0]; // Column A - Level 2
-      var level1 = taxonomyValues[i][1]; // Column B - Level 1
+    // Extract unique Level 1 and Level 2 pairs from Monthly Expanded sheet (skip header row)
+    for (var i = 1; i < expandedValues.length; i++) {
+      var level0 = expandedValues[i][0] ? expandedValues[i][0].toString().trim() : '';
+      var level1 = expandedValues[i][1] ? expandedValues[i][1].toString().trim() : '';
+      var level2 = expandedValues[i][2] ? expandedValues[i][2].toString().trim() : '';
       
       if (level2 && level1) {
-        var level2Str = level2.toString().trim();
-        var level1Str = level1.toString().trim();
-        var pairKey = level1Str + '|' + level2Str;
+        var pairKey = level1 + '|' + level2;
         
         if (!uniquePairs.has(pairKey)) {
           uniquePairs.add(pairKey);
           
-          // Get planned amounts for each month
-          var plannedAmounts = {};
-          for (var monthName in monthColumns) {
-            var colIndex = monthColumns[monthName];
-            var plannedValue = taxonomyValues[i][colIndex];
-            plannedAmounts[monthName] = (plannedValue && typeof plannedValue === 'number') ? plannedValue : 0;
-          }
-          
           categoryPairs.push({
-            level1: level1Str,
-            level2: level2Str,
-            plannedAmounts: plannedAmounts
+            level0: level0,
+            level1: level1,
+            level2: level2
           });
         }
       }
     }
     
     if (categoryPairs.length === 0) {
-      SpreadsheetApp.getUi().alert('No Data', 'No Level 1 and Level 2 pairs found in the Taxonomy sheet.', SpreadsheetApp.getUi().ButtonSet.OK);
+      SpreadsheetApp.getUi().alert('No Data', 'No Level 1 and Level 2 pairs found in the Monthly Expanded sheet.', SpreadsheetApp.getUi().ButtonSet.OK);
       return;
     }
     
@@ -1541,15 +1486,30 @@ function createABVSheet() {
       for (var month = 1; month <= 12; month++) {
         var monthNumber = monthNumbers[month - 1];
         
-        // Get planned amount for this month from taxonomy data - convert month number to name for lookup
-        var monthName = ['January', 'February', 'March', 'April', 'May', 'June', 
-                        'July', 'August', 'September', 'October', 'November', 'December'][month - 1];
-        var plannedAmount = pair.plannedAmounts[monthName] || 0;
+        // Get planned amount from Monthly Expanded sheet by matching all levels and month
+        var plannedAmount = 0;
+        for (var i = 1; i < expandedValues.length; i++) {
+          var rowLevel0 = expandedValues[i][0] ? expandedValues[i][0].toString().trim() : '';
+          var rowLevel1 = expandedValues[i][1] ? expandedValues[i][1].toString().trim() : '';
+          var rowLevel2 = expandedValues[i][2] ? expandedValues[i][2].toString().trim() : '';
+          var rowMonth = expandedValues[i][3];
+          var rowAmount = expandedValues[i][4];
+          
+          // Match on Level 1, Level 2, and month (we'll get Level 0 from the match)
+          if (rowLevel1 === pair.level1 && 
+              rowLevel2 === pair.level2 && 
+              rowMonth === month) {
+            plannedAmount = (rowAmount && typeof rowAmount === 'number') ? rowAmount : 0;
+            // Also update the Level 0 value for this pair
+            pair.level0 = rowLevel0;
+            break; // Found the matching row
+          }
+        }
         
         // Planned row
         var plannedRowNumber = 2 + dataRows.length; // Current row being added
         dataRows.push([
-          `=IFNA(VLOOKUP(C${plannedRowNumber},Taxonomy!$A$2:$C$256,3,0),"")`, // Level 0 lookup
+          pair.level0 || '', // Level 0 from Monthly Expanded sheet
           pair.level1,
           pair.level2,
           monthNumber,
@@ -1566,7 +1526,7 @@ function createABVSheet() {
         var sumFormula = `=SUMIFS(Transactions!J:J,Transactions!B:B,"${monthNumber}",Transactions!F:F,B${actualRowNumber},Transactions!G:G,C${actualRowNumber})`;
         
         dataRows.push([
-          `=IFNA(VLOOKUP(C${actualRowNumber},Taxonomy!$A$2:$C$256,3,0),"")`, // Level 0 lookup
+          pair.level0 || '', // Level 0 from Monthly Expanded sheet
           pair.level1,
           pair.level2,
           monthNumber,
@@ -1615,7 +1575,8 @@ function createABVSheet() {
       'Success', 
       'ABV sheet created successfully!\n\n' +
       'Generated ' + totalRows + ' rows for ' + totalPairs + ' category pairs.\n' +
-      'Each pair has 24 rows (12 months × 2 types: Planned and Actual).', 
+      'Each pair has 24 rows (12 months × 2 types: Planned and Actual).\n\n' +
+      'Planned amounts are now retrieved directly from the Monthly Expanded sheet by matching Level 0, Level 1, Level 2, and Month.', 
       SpreadsheetApp.getUi().ButtonSet.OK
     );
     
@@ -2402,3 +2363,4 @@ function generateRowHTML(label, data, cssClass, expandTarget) {
     </tr>
   `;
 }
+
